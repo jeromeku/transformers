@@ -50,7 +50,7 @@ def sdpa_attention_forward(
     # We convert it to a bool for the SDPA kernel that only accepts bools.
     if torch.jit.is_tracing() and isinstance(is_causal, torch.Tensor):
         is_causal = is_causal.item()
-    breakpoint()
+    
     attn_output = torch.nn.functional.scaled_dot_product_attention(
         query,
         key,
