@@ -2,7 +2,8 @@ import os
 from contextlib import contextmanager
 
 import torch
-from bitsandbytes.nn import Linear4bit
+from bitsandbytes.functional import QuantState
+from bitsandbytes.nn import Linear4bit, Params4bit
 
 from transformers import (
     AutoModelForCausalLM,
@@ -48,7 +49,8 @@ def memory_context(description=""):
 VISION_MODULES_SKIP_PATTERNS = ["embedding", "projector"]
 LANGUAGE_MODULES_SKIP_PATTERNS = ["router", "lm_head"]
 MODULES_SKIP_PATTERNS = VISION_MODULES_SKIP_PATTERNS + LANGUAGE_MODULES_SKIP_PATTERNS
-
+DEVICE = "cuda"
+DTYPE = torch.bfloat16
 model_id = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
 
 bnb_config = BitsAndBytesConfig(
@@ -74,7 +76,6 @@ if not os.path.exists("llama4-scout-17b-16e-instruct-debug"):
     torch.save(model.state_dict(), "llama4-scout-17b-16e-instruct-debug/model.pt")
 
 with memory_context("Llama4ForConditionalGeneration from_pretrained"), torch.device("meta"):
-
     # model = Llama4ForConditionalGeneration.from_pretrained(
     #     "llama4-scout-17b-16e-instruct-debug",
     #     torch_dtype=torch.bfloat16,
@@ -83,18 +84,51 @@ with memory_context("Llama4ForConditionalGeneration from_pretrained"), torch.dev
     #     device_map="auto",
     # )
     model = Llama4ForConditionalGeneration(config)
-    loaded_state_dict = torch.load("llama4-scout-17b-16e-instruct-debug/model.pt", map_location="cpu", weights_only=True, mmap=True)
-    model_state_dict = {}
+
     param_names = [name for name, _ in model.named_parameters()]
     module_names = [name for name, _ in model.named_modules()]
     modules_to_skip = list(filter(lambda x: any(pattern in x for pattern in MODULES_SKIP_PATTERNS), module_names))
     print(modules_to_skip)
-    
-    for name, param in loaded_state_dict.items():
-        assert name in param_names, f"{name} not in {param_names}"
+
     replace_with_bnb_linear(model, modules_to_not_convert=modules_to_skip, quantization_config=bnb_config)
     for name, module in model.named_modules():
         print(f"{name}: {type(module).__name__}")
+    for name, param in model.named_parameters():
+        if isinstance(param, Params4bit):
+            print(f"{name}: {param.device} {param.dtype} {param.shape}")
+
+model_state_dict = {}
+
+with memory_context("Load params"):
+    # Load params
+    loaded_state_dict = torch.load(
+        "llama4-scout-17b-16e-instruct-debug/model.pt", map_location="cpu", weights_only=True, mmap=True
+    )
+    for name, param in loaded_state_dict.items():
+        assert name in param_names, f"{name} not in {param_names}"
+        model_param = model.get_parameter(name)
+        param = param.to(device=DEVICE, dtype=DTYPE)
+        # if isinstance(model_param, Params4bit):
+        #     model_state_dict[name] = Params4bit(param, quant_type="nf4", compress_statistics=True)
+        # else:
+        model_state_dict[name] = param
+
+    model.load_state_dict(model_state_dict, assign=True)
+
+# Need to do a second pass to convert Linear4bit params back to Params4bit
+for name, module in model.named_modules():
+    if isinstance(module, Linear4bit):
+        print(f"{name}: {module.weight.device} {module.weight.dtype} {module.weight.shape}")
+        module.weight = Params4bit(module.weight, quant_type="nf4", compress_statistics=True).to(DEVICE)
+
+
+for name, param in model.named_parameters():
+    print(f"{name} is Params4bit {isinstance(param, Params4bit)}: {param.device} {param.dtype} {param.shape}")
+    if isinstance(param, Params4bit):
+        param.to(DEVICE)
+        quant_state: QuantState = param.quant_state
+        print(f" ->: {param.device} {quant_state.dtype} {quant_state.shape} {hasattr(quant_state, 'state2')}")
+
     # text_model = model.language_model
 # vision_model = model.vision_model
 
