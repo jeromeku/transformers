@@ -113,6 +113,7 @@ with memory_context("Load params"):
         # else:
         model_state_dict[name] = param
 
+    # Assign needed since we want to preserve tensor props of loaded params and not model.params
     model.load_state_dict(model_state_dict, assign=True)
 
 # Need to do a second pass to convert Linear4bit params back to Params4bit
@@ -121,11 +122,9 @@ for name, module in model.named_modules():
         print(f"{name}: {module.weight.device} {module.weight.dtype} {module.weight.shape}")
         module.weight = Params4bit(module.weight, quant_type="nf4", compress_statistics=True).to(DEVICE)
 
-
 for name, param in model.named_parameters():
     print(f"{name} is Params4bit {isinstance(param, Params4bit)}: {param.device} {param.dtype} {param.shape}")
     if isinstance(param, Params4bit):
-        param.to(DEVICE)
         quant_state: QuantState = param.quant_state
         print(f" ->: {param.device} {quant_state.dtype} {quant_state.shape} {hasattr(quant_state, 'state2')}")
 
