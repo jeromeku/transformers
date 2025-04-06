@@ -15,6 +15,13 @@ from transformers import (
     Llama4VisionConfig,
 )
 from transformers.integrations.bitsandbytes import replace_with_bnb_linear
+from transformers.models.llama4.modeling_llama4 import (
+    ROPE_INIT_FUNCTIONS,
+    Llama4ForCausalLM,
+    Llama4TextModel,
+    Llama4TextMoe,
+    Llama4VisionModel,
+)
 from transformers.quantizers import AutoHfQuantizer
 from transformers.utils.logging import set_verbosity_info
 
@@ -122,34 +129,42 @@ for name, module in model.named_modules():
         print(f"{name}: {module.weight.device} {module.weight.dtype} {module.weight.shape}")
         module.weight = Params4bit(module.weight, quant_type="nf4", compress_statistics=True).to(DEVICE)
 
-for name, param in model.named_parameters():
-    print(f"{name} is Params4bit {isinstance(param, Params4bit)}: {param.device} {param.dtype} {param.shape}")
-    if isinstance(param, Params4bit):
-        quant_state: QuantState = param.quant_state
-        print(f" ->: {param.device} {quant_state.dtype} {quant_state.shape} {hasattr(quant_state, 'state2')}")
-
-    # text_model = model.language_model
-# vision_model = model.vision_model
-
-# text_model_size = sum(p.numel() * p.element_size() for p in text_model.parameters())
-# vision_model_size = sum(p.numel() * p.element_size() for p in vision_model.parameters())
-# print(f"text_model_size: {format_memory(text_model_size)}, vision_model_size: {format_memory(vision_model_size)}")
+# Buffers are not loaded from the state dict, so we need to move them to the device
+# model.to(DEVICE)
+print("Model buffers:")
+for name, buffer in model.named_buffers():
+    print(f"{name}: {buffer.device} {buffer.dtype} {buffer.shape}")
 
 # for name, param in model.named_parameters():
-#     if "router" in name or "expert" in name:
-#         print(f"{name}: {param.device} {param.dtype} {param.shape}")
-# # tokenizer = AutoTokenizer.from_pretrained(model_id)
+#     print(f"{name} is Params4bit {isinstance(param, Params4bit)}: {param.device} {param.dtype} {param.shape}")
+#     if isinstance(param, Params4bit):
+#         quant_state: QuantState = param.quant_state
+#         print(f" ->: {param.device} {quant_state.dtype} {quant_state.shape} {hasattr(quant_state, 'state2')}")
 
-# messages = [
-#     {"role": "user", "content": "Who are you?"},
-# ]
-# inputs = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt", return_dict=True)
+# Transfer buffers to device
+language_model: Llama4TextModel = model.language_model.model
+text_config = language_model.rotary_emb.config
 
-# outputs = model.generate(**inputs.to(model.device), max_new_tokens=1)
-# print(outputs)
-# # for name, module in model.named_modules():
-# #     if "router" in name:
-# #         print(name, type(module).__name__)
-# #     if isinstance(module, Linear4bit):
-# #         w = module.weight
-#         quant_state = module.quant_state
+rope_type = "llama3" if text_config.rope_scaling is not None else "default"
+rope_init_fn = ROPE_INIT_FUNCTIONS[rope_type]
+
+inv_freq, _ = rope_init_fn(text_config, DEVICE)
+print(f"inv_freq: {inv_freq.device} {inv_freq.dtype} {inv_freq.shape}")
+language_model.rotary_emb.inv_freq = inv_freq
+
+# vision_model = model.vision_model
+
+# language_model_size = sum(p.numel() * p.element_size() for p in language_model.parameters())
+# vision_model_size = sum(p.numel() * p.element_size() for p in vision_model.parameters())
+# print(f"language_model_size: {format_memory(language_model_size)}, vision_model_size: {format_memory(vision_model_size)}")
+
+
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+messages = [
+    {"role": "user", "content": "Who are you?"},
+]
+inputs = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt", return_dict=True)
+
+outputs = model.generate(**inputs.to(model.device), max_new_tokens=1)
+print(outputs)
