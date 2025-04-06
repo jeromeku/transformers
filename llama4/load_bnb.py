@@ -53,23 +53,18 @@ bnb_config = BitsAndBytesConfig(
     llm_int8_skip_modules=["language_model.model.layers.0.feed_forward.router"],
 )
 
-text_config = Llama4TextConfig(
+debug_text_config = Llama4TextConfig(
     num_hidden_layers=1,
-    num_attention_heads=1,
-    intermediate_size=512,
-    intermediate_size_mlp=512,
-    hidden_size=512,
-    vocab_size=2048,
 )
+
 vision_config = Llama4VisionConfig()
-config = Llama4Config(text_config=text_config, vision_config=vision_config)
+config = Llama4Config(text_config=debug_text_config, vision_config=vision_config)
 quantizer = AutoHfQuantizer.from_config(bnb_config)
 
 if not os.path.exists("llama4-scout-17b-16e-instruct-debug"):
     with memory_context("Llama4ForConditionalGeneration"):
         model = Llama4ForConditionalGeneration(config).to("cuda")
-
-    print(model)
+    # print(model)
     model.save_pretrained("llama4-scout-17b-16e-instruct-debug")
 
 with memory_context("Llama4ForConditionalGeneration from_pretrained"):
@@ -77,7 +72,7 @@ with memory_context("Llama4ForConditionalGeneration from_pretrained"):
         "llama4-scout-17b-16e-instruct-debug",
         torch_dtype=torch.bfloat16,
         # quantization_config=bnb_config,
-        attn_implementation="flash_attention_2",
+        attn_implementation="sdpa",
         device_map="auto",
     )
 
@@ -88,7 +83,7 @@ messages = [
 ]
 inputs = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt", return_dict=True)
 
-outputs = model.generate(**inputs.to(model.device), max_new_tokens=10)
+outputs = model.generate(**inputs.to(model.device), max_new_tokens=1)
 print(outputs)
 # for name, module in model.named_modules():
 #     if "router" in name:

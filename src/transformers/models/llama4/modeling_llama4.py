@@ -337,7 +337,7 @@ class Llama4TextAttention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
-
+        breakpoint()
         query_states = self.q_proj(hidden_states).view(hidden_shape)
         key_states = self.k_proj(hidden_states).view(*input_shape, -1, self.head_dim)
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
@@ -424,7 +424,7 @@ class Llama4TextDecoderLayer(nn.Module):
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         residual = hidden_states
-
+        breakpoint()
         hidden_states = self.input_layernorm(hidden_states)
 
         # use local attention mask for ROPE layers
@@ -678,7 +678,7 @@ class Llama4TextModel(Llama4PreTrainedModel):
         # decoder layers
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
-
+        breakpoint()
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -1757,7 +1757,7 @@ class Llama4ForConditionalGeneration(Llama4PreTrainedModel, GenerationMixin):
             inputs_embeds.masked_scatter_(expanded_mask, projected_vision_flat)
 
             inputs_embeds = inputs_embeds.view(original_inputs_embeds_shape)
-
+        breakpoint()
         outputs = self.language_model(
             attention_mask=attention_mask,
             position_ids=position_ids,
